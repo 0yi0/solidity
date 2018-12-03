@@ -1324,38 +1324,42 @@ shared_ptr<IntegerType const> RationalNumberType::integerType() const
 
 shared_ptr<FixedPointType const> RationalNumberType::fixedPointType() const
 {
-	bool negative = (m_value < 0);
 	unsigned fractionalDigits = 0;
+	unsigned emptyDigits = 0;
+	unsigned const maxDigits = 78; // The length of pow(2, 256).
 	rational value = abs(m_value); // We care about the sign later.
-	rational maxValue = negative ?
-		rational(bigint(1) << 255, 1):
+	rational maxValue = isNegative() ?
+		rational(bigint(1) << 255, 1) :
 		rational((bigint(1) << 256) - 1, 1);
 
-	while (value * 10 <= maxValue && value.denominator() != 1 && fractionalDigits < 80)
+	while ((value * 10 <= maxValue)
+		&& (value.denominator() != 1)
+		&& (fractionalDigits < emptyDigits + maxDigits))
 	{
 		value *= 10;
 		fractionalDigits++;
+		if (value < 1)
+			emptyDigits++;
 	}
 
+	if (fractionalDigits > 80) // Exceed current documentation limit.
+		return shared_ptr<FixedPointType const>();
 	if (value > maxValue)
 		return shared_ptr<FixedPointType const>();
-	// This means we round towards zero for positive and negative values.
-	bigint v = value.numerator() / value.denominator();
 
-	if (negative && v != 0)
+	bigint totalPart = value.numerator();
+	if (isNegative())
 		// modify value to satisfy bit requirements for negative numbers:
 		// add one bit for sign and decrement because negative numbers can be larger
-		v = (v - 1) << 1;
+		totalPart = (totalPart << 1) - 1;
 
-	if (v > u256(-1))
+	unsigned totalBits = max(bytesRequired(totalPart), 1u) * 8;
+	if (totalBits > 256)
 		return shared_ptr<FixedPointType const>();
-
-	unsigned totalBits = max(bytesRequired(v), 1u) * 8;
-	solAssert(totalBits <= 256, "");
 
 	return make_shared<FixedPointType>(
 		totalBits, fractionalDigits,
-		negative ? FixedPointType::Modifier::Signed : FixedPointType::Modifier::Unsigned
+		isNegative() ? FixedPointType::Modifier::Signed : FixedPointType::Modifier::Unsigned
 	);
 }
 
